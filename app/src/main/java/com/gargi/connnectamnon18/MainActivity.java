@@ -4,6 +4,7 @@ import android.app.ListActivity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -20,11 +21,15 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.UUID;
 
 public class MainActivity extends ListActivity {
 
@@ -122,8 +127,80 @@ public class MainActivity extends ListActivity {
         }
     }
 
+
+    private class BtReadWrite extends Thread {
+
+        InputStream mBtInputStream;
+        OutputStream mBtOutputStream;
+
+        public BtReadWrite() {
+
+            try {
+                mBtInputStream = mBluetoothSocket.getInputStream();
+                mBtOutputStream = mBluetoothSocket.getOutputStream()
+
+            }catch (IOException e) {
+                e.printStackTrace();
+            }
+
+        }
+
+        @Override
+        public void run() {
+        }
+
+        private void readData() {
+            
+        }
+
+        public void writeData(byte[] data) {
+            try {
+                mBtOutputStream.write(data);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+
+    private class BtConnectionThread extends Thread {
+
+        public BtConnectionThread(BluetoothDevice btDevice) {
+            BluetoothSocket btSocket = null;
+
+            try {
+                btSocket = btDevice.createRfcommSocketToServiceRecord(MY_UUID);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            mBluetoothSocket = btSocket;
+        }
+
+        @Override
+        public void run() {
+            mBluetoothAdapter.cancelDiscovery();
+            try {
+                mBluetoothSocket.connect();
+            } catch (IOException e) {
+                try {mBluetoothSocket.close();} catch (IOException e1) {}
+                return;
+            }
+        }
+
+        @Override
+        public void interrupt() {
+            try {
+                mBluetoothSocket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            super.interrupt();
+        }
+    }
+
     private LeDeviceListAdapter mLeDeviceListAdapter;
     private BluetoothAdapter mBluetoothAdapter;
+    private BluetoothSocket mBluetoothSocket;
     private boolean mScanning;
     private Handler mHandler;
 
@@ -131,6 +208,8 @@ public class MainActivity extends ListActivity {
 
     private static final long SCAN_PERIOD = 10000;
     private static final int SHOW_DETAILS = 100;
+    private static final UUID MY_UUID =
+            UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -184,6 +263,10 @@ public class MainActivity extends ListActivity {
                 mBluetoothAdapter.stopLeScan(mLeScanCallback);
                 mScanning = false;
             }
+
+            BtConnectionThread connectionThread = new BtConnectionThread(device);
+            connectionThread.start();
+
         } else
             return;
     }
