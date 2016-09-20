@@ -9,8 +9,18 @@
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context="com.gargi.connnectamnon18.MainActivity">
 
-    <TextView
-        android:layout_width="wrap_content"
+    <Button
+        android:id="@+id/scan_btn"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Hello World!" />
+        android:layout_alignParentTop="true"
+        android:text="start scan"/>
+
+    <ListView
+        android:id="@+id/ble_listview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/scan_btn"/>
+
+
 </RelativeLayout>

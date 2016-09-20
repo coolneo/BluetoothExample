@@ -1,21 +1,32 @@
 package com.gargi.connnectamnon18;
 
+import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.ListActivity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothSocket;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Handler;
+import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.AdapterView;
 import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -24,14 +35,12 @@ import android.widget.Toast;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.Date;
 import java.util.UUID;
 
-public class MainActivity extends ListActivity {
+public class MainActivity extends AppCompatActivity {
 
 
     private class LeDeviceListAdapter extends BaseAdapter {
@@ -137,7 +146,7 @@ public class MainActivity extends ListActivity {
 
             try {
                 mBtInputStream = mBluetoothSocket.getInputStream();
-                mBtOutputStream = mBluetoothSocket.getOutputStream()
+                mBtOutputStream = mBluetoothSocket.getOutputStream();
 
             }catch (IOException e) {
                 e.printStackTrace();
@@ -147,13 +156,26 @@ public class MainActivity extends ListActivity {
 
         @Override
         public void run() {
+            byte[] buffer = new byte[256];
+            int bytes;
+
+            // Keep looping to listen for received messages
+            while (true) {
+                try {
+                    bytes = mBtInputStream.read(buffer);        	//read bytes from input buffer
+                    String readMessage = new String(buffer, 0, bytes);
+                    // Send the obtained bytes to the UI Activity via handler
+                    mBtReadHandler.obtainMessage(0, bytes, -1, readMessage).sendToTarget();
+                } catch (IOException e) {
+                    break;
+                }
+            }
         }
 
-        private void readData() {
-            
-        }
 
-        public void writeData(byte[] data) {
+
+        public void writeData(String strData) {
+            byte[] data = strData.getBytes();
             try {
                 mBtOutputStream.write(data);
             } catch (IOException e) {
@@ -181,6 +203,7 @@ public class MainActivity extends ListActivity {
             mBluetoothAdapter.cancelDiscovery();
             try {
                 mBluetoothSocket.connect();
+                sendWelcomeMsgToAmnon();
             } catch (IOException e) {
                 try {mBluetoothSocket.close();} catch (IOException e1) {}
                 return;
@@ -203,18 +226,21 @@ public class MainActivity extends ListActivity {
     private BluetoothSocket mBluetoothSocket;
     private boolean mScanning;
     private Handler mHandler;
+    private ListView mBleListview;
 
     private static final int REQUEST_ENABLE_BT = 1;
-
+    public final static int PERMISSION_TAG = 201;
     private static final long SCAN_PERIOD = 10000;
     private static final int SHOW_DETAILS = 100;
     private static final UUID MY_UUID =
-            UUID.fromString("00001101-0000-1000-8000-00805f9b34fb");
+            UUID.fromString("00001101-0000-1000-8000-00805f9B34FB");
+
+    private boolean mLocationPermissionGranted =  true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getActionBar().setTitle(R.string.title_devices);
+        setContentView(R.layout.activity_main);
 
         mHandler = new Handler();
 
@@ -235,8 +261,59 @@ public class MainActivity extends ListActivity {
             return;
         }
 
+        requestLocationAccess();
+
+        if(!mBluetoothAdapter.isEnabled()) {
+            showToastMsg("Bluetooth is not enabled , please enable it and start the app again");
+        }
+
+        initUi();
+
+
+    }
+
+
+    private void initUi() {
+        Button scanBtn = (Button)findViewById(R.id.scan_btn);
+        mBleListview = (ListView)findViewById(R.id.ble_listview);
         setListAdapter();
 
+
+        scanBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if(mLocationPermissionGranted) {
+                    startBtScanningThread();
+                }
+                else {
+                    showToastMsg("Please give location permission to move ahead");
+                }
+            }
+        });
+
+        mBleListview.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                BluetoothDevice btDevice = mLeDeviceListAdapter.getDevice(position);
+
+                if(btDevice.getName().toLowerCase() == "amnon18" ) {
+                    showToastMsg("connecting to amnon18 please wait");
+                    BtConnectionThread btConnectionThread = new BtConnectionThread(btDevice);
+                    btConnectionThread.start();
+                    scanLeDevice(false);
+                }
+                else {
+                    showToastMsg("This is not amonon18");
+                }
+            }
+        });
+
+    }
+
+    private void sendWelcomeMsgToAmnon() {
+        showToastMsg("sending welcome sequence to amnon18");
+        BtReadWrite btReadWrite = new BtReadWrite();
+        btReadWrite.writeData("A");
     }
 
     @Override
@@ -246,39 +323,14 @@ public class MainActivity extends ListActivity {
         mLeDeviceListAdapter.clear();
     }
 
-
-    @Override
-    protected void onListItemClick(ListView l, View v, int position, long id) {
-        final BluetoothDevice device = mLeDeviceListAdapter.getDevice(position);
-        if (device == null)
-            return;
-
-        if (device != null && device.getName() != null
-                && device.getName().contains("amnon18")) {
-
-            String amnon18Msg = "Amnon18 Connected with device id = "+device.getAddress();
-            Toast.makeText(MainActivity.this, amnon18Msg, Toast.LENGTH_LONG);
-
-            if (mScanning) {
-                mBluetoothAdapter.stopLeScan(mLeScanCallback);
-                mScanning = false;
-            }
-
-            BtConnectionThread connectionThread = new BtConnectionThread(device);
-            connectionThread.start();
-
-        } else
-            return;
+    private void showToastMsg(String msg) {
+        Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
     }
-
-
 
     private void setListAdapter() {
         mLeDeviceListAdapter = new LeDeviceListAdapter();
-        setListAdapter(mLeDeviceListAdapter);
+        mBleListview.setAdapter(mLeDeviceListAdapter);
         mLeDeviceListAdapter.notifyDataSetChanged();
-        startBtScanningThread();
-
     }
 
     private void startBtScanningThread() {
@@ -306,13 +358,40 @@ public class MainActivity extends ListActivity {
 
     private void scanLeDevice(final boolean enable) {
 
+        if(Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP) {
+            performScan(enable);
+        }
+        else {
+            performScanLe(enable);
+        }
+
+    }
+
+    private void performScan(final boolean enable) {
+
+        if(Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP) {
+            BluetoothLeScanner scanner = mBluetoothAdapter.getBluetoothLeScanner();
+
+            if(scanner == null) {
+                return;
+            }
+
+            if(enable) {
+                scanner.startScan(mBleScancallback);
+            }
+            else {
+                scanner.stopScan(mBleScancallback);
+            }
+        }
+    }
+
+    private void performScanLe(final boolean enable) {
         if (enable) {
             mHandler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     mScanning = false;
                     mBluetoothAdapter.stopLeScan(mLeScanCallback);
-                    invalidateOptionsMenu();
                 }
             }, SCAN_PERIOD);
 
@@ -338,6 +417,77 @@ public class MainActivity extends ListActivity {
             });
         }
     };
+
+    @SuppressLint("NewApi")
+    private ScanCallback mBleScancallback = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, final ScanResult result) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    mLeDeviceListAdapter.addDevice(result.getDevice());
+                    mLeDeviceListAdapter.notifyDataSetChanged();
+                }
+            });
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            super.onScanFailed(errorCode);
+        }
+    };
+
+    private Handler mBtReadHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+
+            if(msg.what == 0) {
+                String data = (String)msg.obj;
+
+                if(data == "1") {
+                    Toast.makeText(MainActivity.this, "Amnon18 is connected", Toast.LENGTH_LONG);
+                }
+            }
+
+        }
+    };
+
+
+    /*
+    Permission stuff
+     */
+
+    void requestLocationAccess() {
+        int camera_permission =
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION);
+
+        if(camera_permission == PackageManager.PERMISSION_GRANTED) {
+            mLocationPermissionGranted = true;
+            return;
+        }
+
+        mLocationPermissionGranted = false;
+        String[] perms = new String[] {Manifest.permission.ACCESS_COARSE_LOCATION};
+        ActivityCompat.requestPermissions(this, perms, PERMISSION_TAG);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if(requestCode == PERMISSION_TAG) {
+            if( grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Permission granted
+                mLocationPermissionGranted = true;
+            }
+            else {
+                // Permission denied
+                mLocationPermissionGranted = false;
+            }
+        }
+    }
 
 
     static class ViewHolder {
